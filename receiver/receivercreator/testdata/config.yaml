@@ -5,6 +5,8 @@ receivers:
       rule: test rule
       config:
         endpoint: localhost:12345
+    examplereceiver/2:
+      rule: enabled
 
 processors:
   exampleprocessor:

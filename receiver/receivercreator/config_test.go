@@ -52,7 +52,7 @@ func TestLoadConfig(t *testing.T) {
 	r1 := cfg.Receivers["receiver_creator/1"].(*Config)
 
 	assert.NotNil(t, r1)
-	assert.Len(t, r1.subreceiverConfigs, 1)
+	assert.Len(t, r1.subreceiverConfigs, 2)
 	assert.Contains(t, r1.subreceiverConfigs, "examplereceiver/1")
 	assert.Equal(t, "test rule", r1.subreceiverConfigs["examplereceiver/1"].Rule)
 	assert.Equal(t, map[string]interface{}{

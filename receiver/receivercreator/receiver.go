@@ -15,18 +15,16 @@
 package receivercreator
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
+	"github.com/jwangsadinata/go-multimap/slicemultimap"
 	"github.com/open-telemetry/opentelemetry-collector/component"
 	"github.com/open-telemetry/opentelemetry-collector/config"
-	"github.com/open-telemetry/opentelemetry-collector/config/configmodels"
 	"github.com/open-telemetry/opentelemetry-collector/consumer"
-	"github.com/open-telemetry/opentelemetry-collector/consumer/consumerdata"
-	"github.com/open-telemetry/opentelemetry-collector/oterr"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/observer"
 )
 
 var (
@@ -58,7 +56,8 @@ type receiverCreator struct {
 	nextConsumer consumer.MetricsConsumerOld
 	logger       *zap.Logger
 	cfg          *Config
-	receivers    []component.Receiver
+	observer     observer.Observer
+	loader       *runner
 }
 
 // New creates the receiver_creator with the given parameters.
@@ -75,94 +74,34 @@ func New(logger *zap.Logger, nextConsumer consumer.MetricsConsumerOld, cfg *Conf
 	return r, nil
 }
 
-// loadRuntimeReceiverConfig loads the given subreceiverConfig merged with config values
-// that may have been discovered at runtime.
-func (dr *receiverCreator) loadRuntimeReceiverConfig(
-	staticSubConfig *subreceiverConfig,
-	subConfigFromEnv map[string]interface{}) (configmodels.Receiver, error) {
-	// Load config under <receiver>/<id> since loadReceiver and CustomUnmarshaler expects this structure.
-	viperConfig := viper.New()
-	viperConfig.Set(staticSubConfig.fullName, map[string]interface{}{})
-	subreceiverConfig := viperConfig.Sub(staticSubConfig.fullName)
-
-	// Merge in the config values specified in the config file.
-	if err := subreceiverConfig.MergeConfigMap(staticSubConfig.config); err != nil {
-		return nil, fmt.Errorf("failed to merge subreceiver config from config file: %v", err)
-	}
-
-	// Merge in subConfigFromEnv containing values discovered at runtime.
-	if err := subreceiverConfig.MergeConfigMap(subConfigFromEnv); err != nil {
-		return nil, fmt.Errorf("failed to merge subreceiver config from discovered runtime values: %v", err)
-	}
-
-	receiverConfig, err := config.LoadReceiver(staticSubConfig.fullName, viperConfig, factories)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load subreceiver config: %v", err)
-	}
-	// Sets dynamically created receiver to something like receiver_creator/1/redis{endpoint="localhost:6380"}.
-	// TODO: Need to make sure this is unique (just endpoint is probably not totally sufficient).
-	receiverConfig.SetName(fmt.Sprintf("%s/%s{endpoint=%q}", dr.cfg.Name(), staticSubConfig.fullName, subreceiverConfig.GetString("endpoint")))
-	return receiverConfig, nil
-}
-
-// createRuntimeReceiver creates a receiver that is discovered at runtime.
-func (dr *receiverCreator) createRuntimeReceiver(cfg configmodels.Receiver) (component.MetricsReceiver, error) {
-	factory, err := factories.get(cfg.Type())
-	if err != nil {
-		return nil, err
-	}
-	receiverFactory := factory.(component.ReceiverFactoryOld)
-	return receiverFactory.CreateMetricsReceiver(dr.logger, cfg, dr)
-}
-
 // Start receiver_creator.
 func (dr *receiverCreator) Start(host component.Host) error {
-	// TODO: Temporarily load a single instance of all subreceivers for testing.
-	// Will be done in reaction to observer events later.
-	for _, subconfig := range dr.cfg.subreceiverConfigs {
-		cfg, err := dr.loadRuntimeReceiverConfig(subconfig, map[string]interface{}{})
-		if err != nil {
-			return err
-		}
-		recvr, err := dr.createRuntimeReceiver(cfg)
-		if err != nil {
-			return err
-		}
+	// TODO: Lookup observer at runtime once available.
+	// TODO: Cannot currently cancel observer watch.
 
-		if err := recvr.Start(host); err != nil {
-			return fmt.Errorf("failed starting subreceiver %s: %v", cfg.Name(), err)
-		}
+	// Loader controls starting and stopping receivers.
+	dr.loader = dr.newLoader(host)
 
-		dr.receivers = append(dr.receivers, recvr)
-	}
+	// Responder triggers start/stopping of receivers based on events received from observer.
+	responder := dr.newResponder()
 
-	// TODO: Can result in some receivers left running if an error is encountered
-	// but starting receivers here is only temporary and will be removed when
-	// observer interface added.
-
+	dr.observer.ListAndWatch(responder)
 	return nil
+}
+
+func (dr *receiverCreator) newResponder() *responder {
+	return &responder{runner: dr.loader, logger: dr.logger, subreceiverConfigs: dr.cfg.subreceiverConfigs,
+		started: slicemultimap.New()}
+}
+
+func (dr *receiverCreator) newLoader(host component.Host) *runner {
+	return &runner{parentReceiverName: dr.cfg.Name(), host: host, consumer: dr.nextConsumer,
+		receivers: map[component.Receiver]struct{}{}}
 }
 
 // Shutdown stops the receiver_creator and all its receivers started at runtime.
 func (dr *receiverCreator) Shutdown() error {
-	var errs []error
-
-	for _, recvr := range dr.receivers {
-		if err := recvr.Shutdown(); err != nil {
-			// TODO: Should keep track of which receiver the error is associated with
-			// but require some restructuring.
-			errs = append(errs, err)
-		}
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("shutdown on %d receivers failed: %v", len(errs), oterr.CombineErrors(errs))
-	}
-
-	return nil
-}
-
-// ConsumeMetricsData receives metrics from receivers created at runtime to forward on.
-func (dr *receiverCreator) ConsumeMetricsData(ctx context.Context, md consumerdata.MetricsData) error {
-	return dr.nextConsumer.ConsumeMetricsData(ctx, md)
+	// TODO: maybe if can't cancel the watch make the responder not forward
+	// events to runner?
+	return dr.loader.Shutdown()
 }
