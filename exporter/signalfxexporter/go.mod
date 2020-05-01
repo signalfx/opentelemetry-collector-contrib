@@ -8,5 +8,5 @@ require (
 	github.com/open-telemetry/opentelemetry-collector v0.3.1-0.20200503151053-5d1aacc0e168
 	github.com/signalfx/com_signalfx_metrics_protobuf v0.0.0-20190530013331-054be550cb49
 	github.com/stretchr/testify v1.5.1
-	go.uber.org/zap v1.12.0
+	go.uber.org/zap v1.14.1
 )
