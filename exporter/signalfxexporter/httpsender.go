@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -31,11 +32,14 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector/exporter/exporterhelper"
 	sfxpb "github.com/signalfx/com_signalfx_metrics_protobuf"
 	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver/collection"
 )
 
 // httpSender sends the data to the SignalFx backend.
 type httpSender struct {
 	ingestURL *url.URL
+	apiURL    *url.URL
 	headers   map[string]string
 	client    *http.Client
 	logger    *zap.Logger
@@ -139,4 +143,51 @@ func (s *httpSender) getReader(b []byte) (io.Reader, bool, error) {
 		}
 	}
 	return bytes.NewReader(b), false, err
+}
+
+func (s *httpSender) pushKubernetesMetadata(metadata collection.KubernetesMetadata) error {
+	dimensionUpdate := getDimensionUpdateFromMetadata(metadata)
+
+	json, err := json.Marshal(map[string]interface{}{
+		"key":              dimensionUpdate.dimensionKey,
+		"value":            dimensionUpdate.dimensionValue,
+		"customProperties": dimensionUpdate.properties,
+		"tags":             dimensionUpdate.tags,
+	})
+	if err != nil {
+		return err
+	}
+
+	url, err := s.makeDimURL(dimensionUpdate.dimensionKey, dimensionUpdate.dimensionValue)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("PUT", url.String(), bytes.NewReader(json))
+	if err != nil {
+		return err
+	}
+
+	for k, v := range s.headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	io.Copy(ioutil.Discard, resp.Body)
+	resp.Body.Close()
+
+	return nil
+}
+
+func (s *httpSender) makeDimURL(key, value string) (*url.URL, error) {
+	url, err := s.apiURL.Parse(fmt.Sprintf("/v2/dimension/%s/%s", url.PathEscape(key), url.PathEscape(value)))
+	if err != nil {
+		return nil, fmt.Errorf("could not construct dimension property PUT URL with %s / %s: %v", key, value, err)
+	}
+
+	return url, nil
 }

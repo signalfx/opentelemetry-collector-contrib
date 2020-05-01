@@ -74,6 +74,7 @@ func TestConfig_getOptionsFromConfig(t *testing.T) {
 		AccessToken      string
 		Realm            string
 		IngestURL        string
+		APIURL           string
 		Timeout          time.Duration
 		Headers          map[string]string
 	}
@@ -88,12 +89,18 @@ func TestConfig_getOptionsFromConfig(t *testing.T) {
 			fields: fields{
 				Realm:     "us0",
 				IngestURL: "https://ingest.us1.signalfx.com/",
+				APIURL:    "https://api.us1.signalfx.com/",
 			},
 			want: &exporterOptions{
 				ingestURL: &url.URL{
 					Scheme: "https",
 					Host:   "ingest.us1.signalfx.com",
 					Path:   "/v2/datapoint",
+				},
+				apiURL: &url.URL{
+					Scheme: "https",
+					Host:   "api.us1.signalfx.com",
+					Path:   "/",
 				},
 				httpTimeout: 5 * time.Second,
 			},
@@ -110,6 +117,10 @@ func TestConfig_getOptionsFromConfig(t *testing.T) {
 					Scheme: "https",
 					Host:   "ingest.us0.signalfx.com",
 					Path:   "/v2/datapoint",
+				},
+				apiURL: &url.URL{
+					Scheme: "https",
+					Host:   "api.us0.signalfx.com",
 				},
 				httpTimeout: 10 * time.Second,
 			},
@@ -128,6 +139,7 @@ func TestConfig_getOptionsFromConfig(t *testing.T) {
 				AccessToken:      tt.fields.AccessToken,
 				Realm:            tt.fields.Realm,
 				IngestURL:        tt.fields.IngestURL,
+				APIURL:           tt.fields.APIURL,
 				Timeout:          tt.fields.Timeout,
 				Headers:          tt.fields.Headers,
 			}

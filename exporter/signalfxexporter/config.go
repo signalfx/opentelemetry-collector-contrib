@@ -42,6 +42,10 @@ type Config struct {
 	// If a path is specified it will use the one set by the config.
 	IngestURL string `mapstructure:"ingest_url"`
 
+	// APIURL is the destination to where SignalFx metadata will be sent. This
+	// value takes precedence over the value of Realm
+	APIURL string `mapstructure:"api_url"`
+
 	// Timeout is the maximum timeout for HTTP request sending trace data. The
 	// default value is 5 seconds.
 	Timeout time.Duration `mapstructure:"timeout"`
@@ -63,19 +67,26 @@ func (cfg *Config) getOptionsFromConfig() (*exporterOptions, error) {
 		return nil, fmt.Errorf("invalid \"ingest_url\": %v", err)
 	}
 
+	apiURL, err := cfg.getAPIURL()
+	if err != nil {
+		return nil, fmt.Errorf("invalid \"api_url\": %v", err)
+	}
+
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 5 * time.Second
 	}
 
 	return &exporterOptions{
 		ingestURL:   ingestURL,
+		apiURL:      apiURL,
 		httpTimeout: cfg.Timeout,
 	}, nil
 }
 
 func (cfg *Config) validateConfig() error {
-	if cfg.Realm == "" && cfg.IngestURL == "" {
-		return errors.New("requires a non-empty \"realm\" or \"ingest_url\"")
+	if cfg.Realm == "" && (cfg.IngestURL == "" || cfg.APIURL == "") {
+		return errors.New("requires a non-empty \"realm\", or" +
+			" \"ingest_url\" and \"api_url\" should be explicitly set")
 	}
 
 	if cfg.Timeout < 0 {
@@ -104,4 +115,11 @@ func (cfg *Config) getIngestURL() (out *url.URL, err error) {
 	}
 
 	return out, err
+}
+
+func (cfg *Config) getAPIURL() (*url.URL, error) {
+	if cfg.APIURL == "" {
+		return url.Parse(fmt.Sprintf("https://api.%s.signalfx.com", cfg.Realm))
+	}
+	return url.Parse(cfg.APIURL)
 }

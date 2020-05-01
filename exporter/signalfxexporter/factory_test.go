@@ -121,7 +121,8 @@ func TestFactory_CreateMetricsExporterFails(t *testing.T) {
 					NameVal: typeStr,
 				},
 			},
-			errorMessage: "failed to process \"signalfx\" config: requires a non-empty \"realm\" or \"ingest_url\"",
+			errorMessage: "failed to process \"signalfx\" config: requires a non-empty \"realm\"," +
+				" or \"ingest_url\" and \"api_url\" should be explicitly set",
 		},
 	}
 	for _, tt := range tests {

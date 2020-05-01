@@ -131,6 +131,7 @@ func Test_signalfxeceiver_EndToEnd(t *testing.T) {
 
 	expCfg := &signalfxexporter.Config{
 		IngestURL: "http://" + addr + "/v2/datapoint",
+		APIURL:    "localhost:1234", // random string, since the option is required
 	}
 	exp, err := signalfxexporter.New(expCfg, zap.NewNop())
 	require.NoError(t, err)

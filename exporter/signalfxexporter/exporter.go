@@ -29,14 +29,19 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector/consumer/pdatautil"
 	"github.com/open-telemetry/opentelemetry-collector/obsreport"
 	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver/collection"
 )
 
 type signalfxExporter struct {
-	pushMetricsData func(ctx context.Context, md consumerdata.MetricsData) (droppedTimeSeries int, err error)
+	logger                 *zap.Logger
+	pushMetricsData        func(ctx context.Context, md consumerdata.MetricsData) (droppedTimeSeries int, err error)
+	pushKubernetesMetadata func(metadata collection.KubernetesMetadata) error
 }
 
 type exporterOptions struct {
 	ingestURL   *url.URL
+	apiURL      *url.URL
 	httpTimeout time.Duration
 }
 
@@ -70,6 +75,7 @@ func New(
 
 	s := &httpSender{
 		ingestURL: options.ingestURL,
+		apiURL:    options.apiURL,
 		headers:   headers,
 		client: &http.Client{
 			// TODO: What other settings of http.Client to expose via config?
@@ -83,7 +89,9 @@ func New(
 	}
 
 	return signalfxExporter{
-		pushMetricsData: s.pushMetricsData,
+		logger:                 logger,
+		pushMetricsData:        s.pushMetricsData,
+		pushKubernetesMetadata: s.pushKubernetesMetadata,
 	}, nil
 }
 
@@ -103,4 +111,12 @@ func (se signalfxExporter) ConsumeMetricsData(ctx context.Context, md consumerda
 
 	obsreport.EndMetricsExportOp(ctx, numPoints, numReceivedTimeSeries, numDroppedTimeSeries, err)
 	return err
+}
+
+func (se signalfxExporter) ConsumeKubernetesMetadata(metadata []*collection.KubernetesMetadata) error {
+	for _, m := range metadata {
+		se.logger.Info(fmt.Sprintf("%v", m))
+	}
+	return nil
+	//return se.pushKubernetesMetadata(metadata)
 }
