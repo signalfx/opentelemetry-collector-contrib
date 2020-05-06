@@ -27,6 +27,7 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/open-telemetry/opentelemetry-collector/component/componenterror"
 	"github.com/open-telemetry/opentelemetry-collector/consumer/consumerdata"
 	"github.com/open-telemetry/opentelemetry-collector/consumer/consumererror"
 	"github.com/open-telemetry/opentelemetry-collector/exporter/exporterhelper"
@@ -145,14 +146,24 @@ func (s *httpSender) getReader(b []byte) (io.Reader, bool, error) {
 	return bytes.NewReader(b), false, err
 }
 
-func (s *httpSender) pushKubernetesMetadata(metadata collection.KubernetesMetadata) error {
+func (s *httpSender) pushKubernetesMetadata(metadata map[string]*collection.KubernetesMetadataUpdate) error {
+	var errs []error
+	for _, m := range metadata {
+		if err := s.pushKubernetesMetadataHelper(*m); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return componenterror.CombineErrors(errs)
+}
+
+func (s *httpSender) pushKubernetesMetadataHelper(metadata collection.KubernetesMetadataUpdate) error {
 	dimensionUpdate := getDimensionUpdateFromMetadata(metadata)
 
 	json, err := json.Marshal(map[string]interface{}{
-		"key":              dimensionUpdate.dimensionKey,
-		"value":            dimensionUpdate.dimensionValue,
 		"customProperties": dimensionUpdate.properties,
-		"tags":             dimensionUpdate.tags,
+		"tags":             dimensionUpdate.tagsToAdd,
+		"tagsToRemove":     dimensionUpdate.tagsToRemove,
 	})
 	if err != nil {
 		return err
@@ -163,11 +174,12 @@ func (s *httpSender) pushKubernetesMetadata(metadata collection.KubernetesMetada
 		return err
 	}
 
-	req, err := http.NewRequest("PUT", url.String(), bytes.NewReader(json))
+	req, err := http.NewRequest("PATCH", url.String(), bytes.NewReader(json))
 	if err != nil {
 		return err
 	}
 
+	s.headers["Content-Type"] = "application/json"
 	for k, v := range s.headers {
 		req.Header.Set(k, v)
 	}
@@ -177,14 +189,16 @@ func (s *httpSender) pushKubernetesMetadata(metadata collection.KubernetesMetada
 		return err
 	}
 
-	io.Copy(ioutil.Discard, resp.Body)
-	resp.Body.Close()
+	defer resp.Body.Close()
 
-	return nil
+	body, err := ioutil.ReadAll(resp.Body)
+	fmt.Println(body)
+
+	return err
 }
 
 func (s *httpSender) makeDimURL(key, value string) (*url.URL, error) {
-	url, err := s.apiURL.Parse(fmt.Sprintf("/v2/dimension/%s/%s", url.PathEscape(key), url.PathEscape(value)))
+	url, err := s.apiURL.Parse(fmt.Sprintf("/v2/dimension/%s/%s/_/sfxagent", url.PathEscape(key), url.PathEscape(value)))
 	if err != nil {
 		return nil, fmt.Errorf("could not construct dimension property PUT URL with %s / %s: %v", key, value, err)
 	}

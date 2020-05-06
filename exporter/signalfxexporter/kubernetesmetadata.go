@@ -14,40 +14,82 @@
 
 package signalfxexporter
 
-import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver/collection"
+import (
+	"strings"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver/collection"
+)
 
 type dimensionUpdate struct {
 	dimensionKey   string
 	dimensionValue string
-	properties     map[string]string
-	tags           map[string]bool
+	properties     map[string]*string
+	tagsToAdd      []string
+	tagsToRemove   []string
 }
 
-func getDimensionUpdateFromMetadata(metadata collection.KubernetesMetadata) dimensionUpdate {
-	properties, tags := getPropertiesAndTags(metadata)
+var propNameSanitizer = strings.NewReplacer(
+	".", "_",
+	"/", "_")
+
+func getDimensionUpdateFromMetadata(metadata collection.KubernetesMetadataUpdate) dimensionUpdate {
+	properties, tagsToAdd, tagsToRemove := getPropertiesAndTags(metadata)
 
 	return dimensionUpdate{
-		dimensionKey:   metadata.ResourceIDKey,
+		dimensionKey:   propNameSanitizer.Replace(metadata.ResourceIDKey),
 		dimensionValue: metadata.ResourceID,
 		properties:     properties,
-		tags:           tags,
+		tagsToAdd:      tagsToAdd,
+		tagsToRemove:   tagsToRemove,
 	}
 }
 
-func getPropertiesAndTags(metadata collection.KubernetesMetadata) (map[string]string, map[string]bool) {
-	properties, tags := map[string]string{}, map[string]bool{}
+func getPropertiesAndTags(kmu collection.KubernetesMetadataUpdate) (map[string]*string, []string, []string) {
+	var tagsToAdd []string
+	var tagsToRemove []string
+	properties := map[string]*string{}
 
-	for key, val := range metadata.Properties {
+	for label, val := range kmu.PropertiesToAdd {
+		key := propNameSanitizer.Replace(label)
 		if key == "" {
 			continue
 		}
 
 		if val == "" {
-			tags[key] = true
+			tagsToAdd = append(tagsToAdd, key)
 		} else {
-			properties[key] = val
+			propVal := val
+			properties[key] = &propVal
 		}
 	}
 
-	return properties, tags
+	for label, val := range kmu.PropertiesToRemove {
+		key := propNameSanitizer.Replace(label)
+		if key == "" {
+			continue
+		}
+
+		if val == "" {
+			tagsToRemove = append(tagsToRemove, key)
+		} else {
+			properties[key] = nil
+		}
+	}
+
+	for label, val := range kmu.PropertiesToUpdate {
+		key := propNameSanitizer.Replace(label)
+		if key == "" {
+			continue
+		}
+
+		// Treat it as a remove if a property update has empty value since
+		// this cannot be a tag as tags can either be added or removed but
+		// not updated.
+		if val == "" {
+			properties[key] = nil
+		} else {
+			properties[key] = &val
+		}
+	}
+	return properties, tagsToAdd, tagsToRemove
 }

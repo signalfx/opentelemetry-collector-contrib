@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -99,6 +100,7 @@ func newReceiver(
 ) (component.MetricsReceiver, error) {
 
 	k8sConfig, err := rest.InClusterConfig()
+	k8sConfig, err = clientcmd.BuildConfigFromFlags("", "/Users/akashsuresh/.kube/config") // REMOVE AFTER TESTING
 
 	if err != nil {
 		return nil, err
