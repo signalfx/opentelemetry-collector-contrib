@@ -29,15 +29,23 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector/consumer/pdatautil"
 	"github.com/open-telemetry/opentelemetry-collector/obsreport"
 	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/signalfxexporter/dimensions"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver/collection"
 )
 
 type signalfxExporter struct {
-	pushMetricsData func(ctx context.Context, md consumerdata.MetricsData) (droppedTimeSeries int, err error)
+	logger                 *zap.Logger
+	pushMetricsData        func(ctx context.Context, md consumerdata.MetricsData) (droppedTimeSeries int, err error)
+	pushKubernetesMetadata func(metadata []*collection.KubernetesMetadataUpdate) error
 }
 
 type exporterOptions struct {
-	ingestURL   *url.URL
-	httpTimeout time.Duration
+	ingestURL    *url.URL
+	apiURL       *url.URL
+	httpTimeout  time.Duration
+	token        string
+	logDimUpdate bool
 }
 
 // New returns a new SignalFx exporter.
@@ -82,8 +90,13 @@ func New(
 		}},
 	}
 
+	dimClient := dimensions.NewDimensionClient(options.token, options.apiURL, options.logDimUpdate, logger)
+	dimClient.Start()
+
 	return signalfxExporter{
-		pushMetricsData: dpClient.pushMetricsData,
+		logger:                 logger,
+		pushMetricsData:        dpClient.pushMetricsData,
+		pushKubernetesMetadata: dimClient.PushKubernetesMetadata,
 	}, nil
 }
 
@@ -103,4 +116,8 @@ func (se signalfxExporter) ConsumeMetricsData(ctx context.Context, md consumerda
 
 	obsreport.EndMetricsExportOp(ctx, numPoints, numReceivedTimeSeries, numDroppedTimeSeries, err)
 	return err
+}
+
+func (se signalfxExporter) ConsumeKubernetesMetadata(metadata []*collection.KubernetesMetadataUpdate) error {
+	return se.pushKubernetesMetadata(metadata)
 }
